@@ -57,6 +57,28 @@ def intersect_sphere(ray_o, ray_d):
     return d1 + d2
 
 
+def intersect_cylinder(ray_o, ray_d):
+  
+    # projection to x, y plane of cylinder
+    ray_d_2d = ray_d[:, :2]
+    ray_o_2d = ray_o[:, :2]
+    ratio = torch.norm(ray_d, dim=-1) / torch.norm(ray_d_2d, dim=-1)
+    # no need of ratio because d1, d2 represents the scale of projected ray_d. Same will be applyed to ray_d.
+
+    # do same as above, but on 2d
+    d1 = -torch.sum(ray_d_2d * ray_o_2d, dim=-1) / torch.sum(ray_d_2d * ray_d_2d, dim=-1)
+    p = ray_o_2d + d1.unsqueeze(-1) * ray_d_2d
+    # consider the case where the ray does not intersect the sphere
+    ray_d_cos = 1. / torch.norm(ray_d_2d, dim=-1)
+    p_norm_sq = torch.sum(p * p, dim=-1)
+    if (p_norm_sq >= 1.).any():
+        raise Exception('Not all your cameras are bounded by the unit sphere; please make sure the cameras are normalized properly!')
+    d2 = torch.sqrt(1. - p_norm_sq) * ray_d_cos
+    
+    ret_d = (d1 + d2)
+    return ret_d
+
+
 def perturb_samples(z_vals):
     # get intervals between samples
     mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
@@ -156,7 +178,8 @@ def render_single_image(rank, world_size, models, ray_sampler, chunk_size):
             N_samples = models['cascade_samples'][m]
             if m == 0:
                 # foreground depth
-                fg_far_depth = intersect_sphere(ray_o, ray_d)  # [...,]
+                # fg_far_depth = intersect_sphere(ray_o, ray_d)  # [...,]
+                fg_far_depth = intersect_cylinder(ray_o, ray_d)  # [...,]
                 fg_near_depth = min_depth  # [..., ]
                 step = (fg_far_depth - fg_near_depth) / (N_samples - 1)
                 fg_depth = torch.stack([fg_near_depth + i * step for i in range(N_samples)], dim=-1)  # [..., N_samples]
@@ -369,7 +392,7 @@ def ddp_train_nerf(rank, args):
 
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth)
-    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation',
+    val_ray_samplers = load_data_split(args.datadir, args.scene, split='test',
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip)
 
     # write training image names for autoexposure
@@ -418,7 +441,8 @@ def ddp_train_nerf(rank, args):
             N_samples = models['cascade_samples'][m]
             if m == 0:
                 # foreground depth
-                fg_far_depth = intersect_sphere(ray_batch['ray_o'], ray_batch['ray_d'])  # [...,]
+                # fg_far_depth = intersect_sphere(ray_batch['ray_o'], ray_batch['ray_d'])  # [...,]
+                fg_far_depth = intersect_cylinder(ray_batch['ray_o'], ray_batch['ray_d'])  # [...,]
                 fg_near_depth = ray_batch['min_depth']  # [..., ]
                 step = (fg_far_depth - fg_near_depth) / (N_samples - 1)
                 fg_depth = torch.stack([fg_near_depth + i * step for i in range(N_samples)], dim=-1)  # [..., N_samples]
@@ -588,6 +612,7 @@ def config_parser():
 def train():
     parser = config_parser()
     args = parser.parse_args()
+    print(args)
     logger.info(parser.format_values())
 
     if args.world_size == -1:

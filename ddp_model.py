@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-# import torch.nn.functional as F
+import torch.nn.functional as F
 # import numpy as np
 from utils import TINY_NUMBER, HUGE_NUMBER
 from collections import OrderedDict
@@ -31,7 +31,8 @@ def depth2pts_outside(ray_o, ray_d, depth):
     phi = torch.asin(p_mid_norm)
     theta = torch.asin(p_mid_norm * depth)  # depth is inside [0, 1]
     rot_angle = (phi - theta).unsqueeze(-1)     # [..., 1]
-
+    # print(rot_axis.shape, p_sphere.shape)
+    
     # now rotate p_sphere
     # Rodrigues formula: https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
     p_sphere_new = p_sphere * torch.cos(rot_angle) + \
@@ -42,6 +43,48 @@ def depth2pts_outside(ray_o, ray_d, depth):
 
     # now calculate conventional depth
     depth_real = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_cos + d1
+    return pts, depth_real
+
+
+def depth2pts_outside_cylinder(ray_o, ray_d, depth):
+    
+    # projection to x, y plane of cylinder
+    ray_d_2d = ray_d[:, :, :2]
+    ray_o_2d = ray_o[:, :, :2]
+    ratio = torch.norm(ray_d, dim=-1) / torch.norm(ray_d_2d, dim=-1) # ratio between 3d and 2d projection
+
+    # do same as above, but on projected 2d
+    # note: d1 becomes negative if this mid point is behind camera
+
+    d1 = -torch.sum(ray_d_2d * ray_o_2d, dim=-1) / torch.sum(ray_d_2d * ray_d_2d, dim=-1)
+    p_mid_2d = ray_o_2d + d1.unsqueeze(-1) * ray_d_2d
+    p_mid_3d = ray_o + d1.unsqueeze(-1) * ray_d
+    p_mid_2d_norm = torch.norm(p_mid_2d, dim=-1)
+    ray_d_2d_cos = 1. / torch.norm(ray_d_2d, dim=-1)
+    d2 = torch.sqrt(1. - p_mid_2d_norm * p_mid_2d_norm) * ray_d_2d_cos
+    p_sphere_3d = ray_o + (d1 + d2).unsqueeze(-1) * ray_d
+    
+    phi = torch.asin(p_mid_2d_norm)
+    theta = torch.asin(p_mid_2d_norm * depth * ratio)  # depth is inside [0, 1]
+    rot_angle = (phi - theta).unsqueeze(-1)     # [..., 1]
+    rot_axis = torch.Tensor([[0., 0., 1.]]).cuda() # rotation axis will be the z-axis of the cylinder because of the projection
+    rot_axis = rot_axis.repeat(p_sphere_3d.shape[0], p_sphere_3d.shape[1])
+    rot_axis = rot_axis / torch.norm(rot_axis, dim=-1, keepdim=True)
+    rot_axis = torch.reshape(rot_axis, (p_sphere_3d.shape[0], p_sphere_3d.shape[1], -1))
+
+    # now rotate p_sphere
+    # Rodrigues formula: https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
+    # follow the original formular because we just need to rotate rot_angle agains the rot_axis as same as before
+    p_sphere_new = p_sphere_3d * torch.cos(rot_angle) + \
+                   torch.cross(rot_axis, p_sphere_3d, dim=-1) * torch.sin(rot_angle) + \
+                   rot_axis * torch.sum(rot_axis*p_sphere_3d, dim=-1, keepdim=True) * (1.-torch.cos(rot_angle))
+    p_sphere_new = p_sphere_new / torch.norm(p_sphere_new, dim=-1, keepdim=True)
+    pts = torch.cat((p_sphere_new, depth.unsqueeze(-1)), dim=-1)
+
+    # now calculate conventional depth
+    depth_real_2d = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_2d_cos + d1
+    # multiple ratio because depth is calculated in 2d projection
+    depth_real = depth_real_2d * ratio
     return pts, depth_real
 
 
@@ -105,11 +148,14 @@ class NerfNet(nn.Module):
         fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)     # [...,]
 
         # render background
+        # change
+        # 1/r to cylinderical coordinate.
         N_samples = bg_z_vals.shape[-1]
         bg_ray_o = ray_o.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
         bg_ray_d = ray_d.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
         bg_viewdirs = viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
-        bg_pts, _ = depth2pts_outside(bg_ray_o, bg_ray_d, bg_z_vals)  # [..., N_samples, 4]
+        # bg_pts, _ = depth2pts_outside(bg_ray_o, bg_ray_d, bg_z_vals)  # [..., N_samples, 4]
+        bg_pts, _ = depth2pts_outside_cylinder(bg_ray_o, bg_ray_d, bg_z_vals)  # [..., N_samples, 4]
         input = torch.cat((self.bg_embedder_position(bg_pts),
                            self.bg_embedder_viewdir(bg_viewdirs)), dim=-1)
         # near_depth: physical far; far_depth: physical near
