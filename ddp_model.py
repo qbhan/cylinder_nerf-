@@ -51,7 +51,7 @@ def depth2pts_outside_cylinder(ray_o, ray_d, depth):
     # projection to x, y plane of cylinder
     ray_d_2d = ray_d[:, :, :2]
     ray_o_2d = ray_o[:, :, :2]
-    ratio = torch.norm(ray_d, dim=-1) / torch.norm(ray_d_2d, dim=-1) # ratio between 3d and 2d projection
+    # ratio = torch.norm(ray_d, dim=-1) / torch.norm(ray_d_2d, dim=-1) # ratio between 3d and 2d projection
 
     # do same as above, but on projected 2d
     # note: d1 becomes negative if this mid point is behind camera
@@ -60,17 +60,16 @@ def depth2pts_outside_cylinder(ray_o, ray_d, depth):
     p_mid_2d = ray_o_2d + d1.unsqueeze(-1) * ray_d_2d
     p_mid_3d = ray_o + d1.unsqueeze(-1) * ray_d
     p_mid_2d_norm = torch.norm(p_mid_2d, dim=-1)
+    p_mid_3d_norm = torch.norm(p_mid_3d, dim=-1)
     ray_d_2d_cos = 1. / torch.norm(ray_d_2d, dim=-1)
     d2 = torch.sqrt(1. - p_mid_2d_norm * p_mid_2d_norm) * ray_d_2d_cos
     p_sphere_3d = ray_o + (d1 + d2).unsqueeze(-1) * ray_d
     
-    phi = torch.asin(p_mid_2d_norm)
-    theta = torch.asin(p_mid_2d_norm * depth * ratio)  # depth is inside [0, 1]
+    phi = torch.asin(p_mid_3d_norm / torch.norm(p_sphere_3d))
+    theta = torch.asin(p_mid_3d_norm * depth)  # depth is inside [0, 1]
     rot_angle = (phi - theta).unsqueeze(-1)     # [..., 1]
-    rot_axis = torch.Tensor([[0., 0., 1.]]).cuda() # rotation axis will be the z-axis of the cylinder because of the projection
-    rot_axis = rot_axis.repeat(p_sphere_3d.shape[0], p_sphere_3d.shape[1])
+    rot_axis = torch.cross(p_mid_3d, ray_d, dim=-1)
     rot_axis = rot_axis / torch.norm(rot_axis, dim=-1, keepdim=True)
-    rot_axis = torch.reshape(rot_axis, (p_sphere_3d.shape[0], p_sphere_3d.shape[1], -1))
 
     # now rotate p_sphere
     # Rodrigues formula: https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
@@ -78,13 +77,22 @@ def depth2pts_outside_cylinder(ray_o, ray_d, depth):
     p_sphere_new = p_sphere_3d * torch.cos(rot_angle) + \
                    torch.cross(rot_axis, p_sphere_3d, dim=-1) * torch.sin(rot_angle) + \
                    rot_axis * torch.sum(rot_axis*p_sphere_3d, dim=-1, keepdim=True) * (1.-torch.cos(rot_angle))
-    p_sphere_new = p_sphere_new / torch.norm(p_sphere_new, dim=-1, keepdim=True)
+    p_sphere_new_2d = p_sphere_new[:, :, :2]
+    p_sphere_new = p_sphere_new / torch.norm(p_sphere_new_2d)
+    # print(p_sphere_new_2d.shape, p_sphere_new[:, :, 2].shape)
+    # p_sphere_new = torch.cat((p_sphere_new_2d, p_sphere_new[:, :, 2].unsqueeze(-1)), dim=-1)
+
     pts = torch.cat((p_sphere_new, depth.unsqueeze(-1)), dim=-1)
 
     # now calculate conventional depth
-    depth_real_2d = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_2d_cos + d1
-    # multiple ratio because depth is calculated in 2d projection
-    depth_real = depth_real_2d * ratio
+    # ratio = depth / torch.norm(p_sphere_new)
+    # x_inv, y_inv, z_real = p_sphere_new[:, :, 0] * ratio, p_sphere_new[:, :, 1] * ratio,p_sphere_new[:, :, 2] * ratio
+    # x_real, y_real = 1 / (x_inv + TINY_NUMBER), 1 / (y_inv + TINY_NUMBER)
+    # depth_r = torch.norm(torch.cat((x_real, y_real, z_real), dim=-1))
+    # depth_real = depth_r * torch.cos(theta) * ray_d_2d_cos + d1
+    ray_d_cos = 1. / torch.norm(ray_d, dim=-1)
+    depth_real = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_cos + d1
+    
     return pts, depth_real
 
 
