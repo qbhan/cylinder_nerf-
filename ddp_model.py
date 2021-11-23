@@ -1,3 +1,4 @@
+from cv2 import DIST_MASK_3
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,6 +20,7 @@ def depth2pts_outside(ray_o, ray_d, depth):
     depth: [...]; inverse of distance to sphere origin
     '''
     # note: d1 becomes negative if this mid point is behind camera
+    # print(depth[0,:])
     d1 = -torch.sum(ray_d * ray_o, dim=-1) / torch.sum(ray_d * ray_d, dim=-1)
     p_mid = ray_o + d1.unsqueeze(-1) * ray_d
     p_mid_norm = torch.norm(p_mid, dim=-1)
@@ -46,7 +48,7 @@ def depth2pts_outside(ray_o, ray_d, depth):
     return pts, depth_real
 
 
-def depth2pts_outside_cylinder(ray_o, ray_d, depth):
+def depth2pts_outside_cylinder(ray_o, ray_d, inv_r):
     
     # projection to x, y plane of cylinder
     ray_d_2d = ray_d[:, :, :2]
@@ -65,33 +67,20 @@ def depth2pts_outside_cylinder(ray_o, ray_d, depth):
     d2 = torch.sqrt(1. - p_mid_2d_norm * p_mid_2d_norm) * ray_d_2d_cos
     p_sphere_3d = ray_o + (d1 + d2).unsqueeze(-1) * ray_d
     
-    phi = torch.asin(p_mid_3d_norm / torch.norm(p_sphere_3d))
-    theta = torch.asin(p_mid_3d_norm * depth)  # depth is inside [0, 1]
-    rot_angle = (phi - theta).unsqueeze(-1)     # [..., 1]
-    rot_axis = torch.cross(p_mid_3d, ray_d, dim=-1)
-    rot_axis = rot_axis / torch.norm(rot_axis, dim=-1, keepdim=True)
+    r = 1 / (TINY_NUMBER + inv_r)
+    r = r.unsqueeze(-1)
+    # print(r.shape)
+    d3 = torch.sqrt(torch.square(torch.sum(ray_d_2d * ray_o_2d, dim=-1)) + torch.sum(ray_d_2d * ray_d_2d, dim=-1) * (torch.sum(r * r, dim=-1) - torch.sum(ray_o_2d * ray_o_2d, dim=-1))) / (torch.sum(ray_d_2d * ray_d_2d, dim=-1) + TINY_NUMBER)
+    # t = d1 + d3
+    # print(ray_o.isnan().any(), ray_d.isnan().any(), inv_r.isnan().any(), d3.isnan().any())
+    p_cylinder = ray_o + (d1 + d3).unsqueeze(-1) * ray_d
+    p_cylinder_2d_norm = torch.norm(p_cylinder[:, :, :2], dim=-1)
+    # print(p_cylinder.shape, p_cylinder_2d_norm.shape)
+    p_cylinder = p_cylinder / p_cylinder_2d_norm.unsqueeze(-1)
+    pts = torch.cat((p_cylinder, inv_r.unsqueeze(-1)), dim=-1)
 
-    # now rotate p_sphere
-    # Rodrigues formula: https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
-    # follow the original formular because we just need to rotate rot_angle agains the rot_axis as same as before
-    p_sphere_new = p_sphere_3d * torch.cos(rot_angle) + \
-                   torch.cross(rot_axis, p_sphere_3d, dim=-1) * torch.sin(rot_angle) + \
-                   rot_axis * torch.sum(rot_axis*p_sphere_3d, dim=-1, keepdim=True) * (1.-torch.cos(rot_angle))
-    p_sphere_new_2d = p_sphere_new[:, :, :2]
-    p_sphere_new = p_sphere_new / torch.norm(p_sphere_new_2d)
-    # print(p_sphere_new_2d.shape, p_sphere_new[:, :, 2].shape)
-    # p_sphere_new = torch.cat((p_sphere_new_2d, p_sphere_new[:, :, 2].unsqueeze(-1)), dim=-1)
-
-    pts = torch.cat((p_sphere_new, depth.unsqueeze(-1)), dim=-1)
-
-    # now calculate conventional depth
-    # ratio = depth / torch.norm(p_sphere_new)
-    # x_inv, y_inv, z_real = p_sphere_new[:, :, 0] * ratio, p_sphere_new[:, :, 1] * ratio,p_sphere_new[:, :, 2] * ratio
-    # x_real, y_real = 1 / (x_inv + TINY_NUMBER), 1 / (y_inv + TINY_NUMBER)
-    # depth_r = torch.norm(torch.cat((x_real, y_real, z_real), dim=-1))
-    # depth_real = depth_r * torch.cos(theta) * ray_d_2d_cos + d1
-    ray_d_cos = 1. / torch.norm(ray_d, dim=-1)
-    depth_real = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_cos + d1
+    depth_real = torch.norm(ray_o + (d1 + d3).unsqueeze(-1) * ray_d, dim=-1)
+    # print(depth_real)
     
     return pts, depth_real
 
@@ -122,7 +111,7 @@ class NerfNet(nn.Module):
                              input_ch_viewdirs=self.bg_embedder_viewdir.out_dim,
                              use_viewdirs=args.use_viewdirs)
 
-    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals):
+    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, bg_r_vals=None):
         '''
         :param ray_o, ray_d: [..., 3]
         :param fg_z_max: [...,]
@@ -130,6 +119,8 @@ class NerfNet(nn.Module):
         :return
         '''
         # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
+        is_nan = ray_o.isnan().any() and ray_d.isnan().any() and fg_z_max.isnan().any() and fg_z_vals.isnan().any() and bg_z_vals.isnan().any()
+        # print('input', is_nan)
         ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
         viewdirs = ray_d / ray_d_norm      # [..., 3]
         dots_sh = list(ray_d.shape[:-1])
@@ -140,6 +131,7 @@ class NerfNet(nn.Module):
         fg_ray_d = ray_d.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
         fg_viewdirs = viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
         fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
+        # print(fg_pts)
         input = torch.cat((self.fg_embedder_position(fg_pts),
                            self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
         fg_raw = self.fg_net(input)
@@ -164,6 +156,8 @@ class NerfNet(nn.Module):
         bg_viewdirs = viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
         # bg_pts, _ = depth2pts_outside(bg_ray_o, bg_ray_d, bg_z_vals)  # [..., N_samples, 4]
         bg_pts, _ = depth2pts_outside_cylinder(bg_ray_o, bg_ray_d, bg_z_vals)  # [..., N_samples, 4]
+        # print('cylinder background input', bg_ray_o.isnan().any() and bg_ray_d.isnan().any() and bg_z_vals.isnan().any())
+        # print('cylinder background', bg_pts.isnan().any())
         input = torch.cat((self.bg_embedder_position(bg_pts),
                            self.bg_embedder_viewdir(bg_viewdirs)), dim=-1)
         # near_depth: physical far; far_depth: physical near
@@ -173,6 +167,7 @@ class NerfNet(nn.Module):
         bg_dists = torch.cat((bg_dists, HUGE_NUMBER * torch.ones_like(bg_dists[..., 0:1])), dim=-1)  # [..., N_samples]
         bg_raw = self.bg_net(input)
         bg_alpha = 1. - torch.exp(-bg_raw['sigma'] * bg_dists)  # [..., N_samples]
+        # print(bg_raw)
         # Eq. (3): T
         # maths show weights, and summation of weights along a ray, are always inside [0, 1]
         T = torch.cumprod(1. - bg_alpha + TINY_NUMBER, dim=-1)[..., :-1]  # [..., N_samples-1]
@@ -194,6 +189,8 @@ class NerfNet(nn.Module):
                            ('bg_rgb', bg_rgb_map),
                            ('bg_depth', bg_depth_map),
                            ('bg_lambda', bg_lambda)])
+        # isnan = rgb_map.isnan().any() and fg_weights.isnan().any() and bg_weights.isnan().any() and fg_rgb_map.isnan().any() and fg_depth_map.isnan().any() and bg_rgb_map.isnan().any() and bg_depth_map.isnan().any() and bg_lambda.isnan().any()
+        # print(isnan)
         return ret
 
 

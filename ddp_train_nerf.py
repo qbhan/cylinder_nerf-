@@ -208,7 +208,7 @@ def render_single_image(rank, world_size, models, ray_sampler, chunk_size):
                 bg_depth_samples = sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                                               N_samples=N_samples, det=True)    # [..., N_samples]
                 bg_depth, _ = torch.sort(torch.cat((bg_depth, bg_depth_samples), dim=-1))
-
+            
                 # delete unused memory
                 del fg_weights
                 del fg_depth_mid
@@ -449,12 +449,13 @@ def ddp_train_nerf(rank, args):
                 fg_depth = perturb_samples(fg_depth)   # random perturbation during training
 
                 # background depth
-                bg_depth = torch.linspace(0., 1., N_samples).view(
+                bg_z = torch.linspace(0., 1., N_samples).view(
                             [1, ] * len(dots_sh) + [N_samples,]).expand(dots_sh + [N_samples,]).to(rank)
-                bg_depth = perturb_samples(bg_depth)   # random perturbation during training
+                bg_z = perturb_samples(bg_z)   # random perturbation during training
             else:
                 # sample pdf and concat with earlier samples
                 fg_weights = ret['fg_weights'].clone().detach()
+                # print(torch.isnan(fg_weights))
                 fg_depth_mid = .5 * (fg_depth[..., 1:] + fg_depth[..., :-1])    # [..., N_samples-1]
                 fg_weights = fg_weights[..., 1:-1]                              # [..., N_samples-2]
                 fg_depth_samples = sample_pdf(bins=fg_depth_mid, weights=fg_weights,
@@ -463,14 +464,17 @@ def ddp_train_nerf(rank, args):
 
                 # sample pdf and concat with earlier samples
                 bg_weights = ret['bg_weights'].clone().detach()
-                bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
+                bg_depth_mid = .5 * (bg_z[..., 1:] + bg_z[..., :-1])
                 bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
+    
                 bg_depth_samples = sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                                               N_samples=N_samples, det=False)    # [..., N_samples]
-                bg_depth, _ = torch.sort(torch.cat((bg_depth, bg_depth_samples), dim=-1))
+                # print(bg_depth_samples)
+                bg_z, _ = torch.sort(torch.cat((bg_z, bg_depth_samples), dim=-1))
 
             optim.zero_grad()
-            ret = net(ray_batch['ray_o'], ray_batch['ray_d'], fg_far_depth, fg_depth, bg_depth, img_name=ray_batch['img_name'])
+            # print(bg_z)
+            ret = net(ray_batch['ray_o'], ray_batch['ray_d'], fg_far_depth, fg_depth, bg_z, img_name=ray_batch['img_name'])
             all_rets.append(ret)
 
             rgb_gt = ray_batch['rgb'].to(rank)
@@ -488,6 +492,7 @@ def ddp_train_nerf(rank, args):
             scalars_to_log['level_{}/loss'.format(m)] = rgb_loss.item()
             scalars_to_log['level_{}/pnsr'.format(m)] = mse2psnr(rgb_loss.item())
             loss.backward()
+            # nn.utils.clip_grad_norm_(net.parameters(), 5)
             optim.step()
 
             # # clean unused memory
