@@ -26,13 +26,47 @@ def get_rays_single_image(H, W, intrinsics, c2w):
     rays_d = rays_d.transpose((1, 0))  # (H*W, 3)
 
     rays_o = c2w[:3, 3].reshape((1, 3))
-    rays_o = np.tile(rays_o, (rays_d.shape[0], 1))  # (H*W, 3)
+    rays_o  = np.tile(rays_o, (rays_d.shape[0], 1))  # (H*W, 3)
 
     depth = np.linalg.inv(c2w)[2, 3]
     depth = depth * np.ones((rays_o.shape[0],), dtype=np.float32)  # (H*W,)
 
     return rays_o, rays_d, depth
 
+
+def get_rays_single_image_360(H, W, intrinsics, c2w):
+    pass
+    u, v = np.meshgrid(np.arange(W), np.arange(H))
+
+    u = u.reshape(-1).astype(dtype=np.float32) + 0.5    # add half pixel
+    v = v.reshape(-1).astype(dtype=np.float32) + 0.5
+    # u = u - W / 2   # set center to 0
+    # v = v - H / 2
+    # print(u, v)
+    u = (u / W) * 2 * np.pi # theta
+    # v = (v / H) * np.pi # phi
+    # x = np.sin(v) * np.cos(u)
+    # y = np.sin(v) * np.sin(u)
+    # z = -np.cos(v)
+    r = W / (2 * np.pi)
+    x = np.sin(u) * r
+    y = v
+    z = np.cos(u) * r
+    x_prime, y_prime, z_prime = x, y, z
+    pixels = np.stack((x_prime, y_prime, z_prime), axis=0)
+    
+    rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), pixels)
+    rays_d = np.dot(c2w[:3, :3], rays_d)  # (3, H*W)
+    rays_d = rays_d.transpose((1, 0))  # (H*W, 3)
+    
+    rays_o = c2w[:3, 3].reshape((1, 3))
+    rays_o = np.tile(rays_o, (rays_d.shape[0], 1))  # (H*W, 3)
+
+    depth = np.linalg.inv(c2w)[2, 3]
+    depth = depth * np.ones((rays_o.shape[0],), dtype=np.float32)  # (H*W,)
+    
+    return rays_o, rays_d, depth
+    # return pixel
 
 class RaySamplerSingleImage(object):
     def __init__(self, H, W, intrinsics, c2w,
@@ -84,7 +118,9 @@ class RaySamplerSingleImage(object):
             else:
                 self.min_depth = None
 
-            self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
+            # self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
+            #                                                              self.intrinsics, self.c2w_mat)
+            self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
                                                                          self.intrinsics, self.c2w_mat)
 
     def get_img(self):
@@ -172,3 +208,7 @@ class RaySamplerSingleImage(object):
                 ret[k] = torch.from_numpy(ret[k])
 
         return ret
+
+
+# b = get_rays_single_image_360(3, 3, None, None)
+# print(b)
