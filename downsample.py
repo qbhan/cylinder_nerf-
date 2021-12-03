@@ -23,4 +23,4 @@ def downsample(img, scale=4):
         img = img.resize((w//scale,h//scale),Image.ANTIALIAS) # regular resize
     return img
 
-downsample_dir('data/360/room2_downscale/train')
+downsample_dir('data/360/room4_downscale/test')
