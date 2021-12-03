@@ -6,7 +6,7 @@ import numpy as np
 
 HUGE_NUMBER = 1e10
 TINY_NUMBER = 1e-6      # float32 only has 7 decimal digits precision
-
+ 
 
 # misc utils
 def img2mse(x, y, mask=None):
@@ -125,3 +125,39 @@ def colorize(x, cmap_name='jet', append_cbar=False, mask=None):
 
     x = torch.from_numpy(x)
     return x
+
+
+from py360convert import e2c
+from PIL import Image
+from os import listdir, remove
+import shutil
+arr = ('F', 'R', 'B', 'L', 'U', 'D')
+def save_cubemap(dir, w):
+    dirs = listdir(dir)
+    print(dirs)
+    for img_dir in dirs:
+        img_dir = dir + '/' + img_dir
+        print(img_dir)
+        img = np.array(Image.open(img_dir))
+        img_cubelist = e2c(img, w, mode='bilinear', cube_format='list')
+        for i in range(6):
+            img_pil = Image.fromarray(img_cubelist[i].astype('uint8'), 'RGB')
+            img_new_dir = img_dir.split('.')[0] + '_' + arr[i] + '.jpg'
+            print(img_new_dir)
+            img_pil.save(img_new_dir)
+        remove(img_dir)
+        
+
+def dup_file(root):
+    dirs = listdir(root)
+    print(dirs)
+    for dir in dirs:
+        dir = root + '/' + dir
+        for i in range(6):
+            new_dir = dir.split('.')[0] + '_' + arr[i] + '.' + dir.split('.')[-1]
+            print(new_dir)
+            shutil.copyfile(dir, new_dir)
+        remove(dir)
+            
+# save_cubemap('data/360/room4_downscale_cube/train/rgb', 400)
+# dup_file('data/360/room4_downscale_cube/test/intrinsics')
