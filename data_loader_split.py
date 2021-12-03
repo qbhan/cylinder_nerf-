@@ -84,6 +84,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
     # create ray samplers
     ray_samplers = []
+    logger.info('creating ray samplers')
     for i in range(cam_cnt):
         intrinsics = parse_txt(intrinsics_files[i])
         pose = parse_txt(pose_files[i])

@@ -3,6 +3,7 @@ from collections import OrderedDict
 import torch
 import cv2
 import imageio
+from py360convert import e2c
 
 ########################################################################################################################
 # ray batch sampling
@@ -17,8 +18,8 @@ def get_rays_single_image(H, W, intrinsics, c2w):
     '''
     u, v = np.meshgrid(np.arange(W), np.arange(H))
 
-    u = u.reshape(-1).astype(dtype=np.float32) + 0.5    # add half pixel
-    v = v.reshape(-1).astype(dtype=np.float32) + 0.5
+    u = u.reshape(-1).astype(dtype=np.float32) + 0.5 - W/2    # add half pixel
+    v = v.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2
     pixels = np.stack((u, v, np.ones_like(u)), axis=0)  # (3, H*W)
 
     rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), pixels)
@@ -33,7 +34,90 @@ def get_rays_single_image(H, W, intrinsics, c2w):
 
     return rays_o, rays_d, depth
 
+# sampling for training 6 images of cubemap in one pass
+def get_rays_single_image_cubemap(H, intrinsics, c2w):
+    '''
+    :param H: image height
+    :param W: image width
+    :param intrinsics: 4 by 4 intrinsic matrix
+    :param c2w: 4 by 4 camera to world extrinsic matrix
+    :return:
+    '''
+    u, v = np.meshgrid(np.arange(H), np.arange(H))
 
+    u = u.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2   # add half pixel, adjust center
+    v = v.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2
+    d = np.ones_like(u)
+    # pixels = np.stack((u, v, d), axis=0)  # (3, H*W)
+    rays_d_list = []
+    # append rays_d in order of F, R, B, L, U, D
+    # each (3, H*W)
+    rays_d_list.append(np.stack((u, v, d), axis=0)) #Front
+    rays_d_list.append(np.stack((d, v, -u), axis=0)) #Right
+    rays_d_list.append(np.stack((u, v, -d), axis=0)) #Back
+    rays_d_list.append(np.stack((-d, v, u), axis=0)) #Left
+    rays_d_list.append(np.stack((u, -d, v), axis=0)) #Up
+    rays_d_list.append(np.stack((u, d, -v), axis=0)) #Down
+    rays_d = np.concatenate(rays_d_list, axis=-1) # (3, H*W*6)
+    # print(rays_d.shape)
+    rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), rays_d)
+    rays_d = np.dot(c2w[:3, :3], rays_d)  # (3, H*W*6)
+    rays_d = rays_d.transpose((1, 0))  # (H*W*6, 3)
+    rays_d_list.append(rays_d)
+
+    rays_o = c2w[:3, 3].reshape((1, 3))
+    rays_o  = np.tile(rays_o, (rays_d.shape[0], 1))  # (H*W*6, 3)
+
+    depth = np.linalg.inv(c2w)[2, 3]
+    depth = depth * np.ones((rays_o.shape[0],), dtype=np.float32)  # (H*W*6,)
+
+    return rays_o, rays_d, depth
+
+# sampling for training 6 images of cubemap each one at a time
+def get_rays_single_image_cube(H, W, intrinsics, c2w, imgpath):
+    '''
+    :param H: image height
+    :param W: image width
+    :param intrinsics: 4 by 4 intrinsic matrix
+    :param c2w: 4 by 4 camera to world extrinsic matrix
+    :return:
+    '''
+    u, v = np.meshgrid(np.arange(W), np.arange(H))
+
+    u = u.reshape(-1).astype(dtype=np.float32) + 0.5 # add half pixel, adjust center
+    v = v.reshape(-1).astype(dtype=np.float32) + 0.5
+    d = np.ones_like(u)
+    # pixels = np.stack((u, v, d), axis=0)  # (3, H*W)
+    # append rays_d in order of F, R, B, L, U, D
+    # each (3, H*W)
+    # print(imgpath.split('_')[-1])
+    if 'F' in imgpath.split('_')[-1]:
+        rays_d = np.stack((u, v, d), axis=0) #Front
+    elif 'R' in imgpath.split('_')[-1]:
+        rays_d = np.stack((d, v, -u), axis=0) #Right
+    elif 'B' in imgpath.split('_')[-1]:
+        rays_d = np.stack((u, v, -d), axis=0) #Back
+    elif 'L' in imgpath.split('_')[-1]:
+        rays_d = np.stack((-d, v, u), axis=0) #Left
+    elif 'U' in imgpath.split('_')[-1]:
+        rays_d = np.stack((u, -d, v), axis=0) #Up
+    elif 'D' in imgpath.split('_')[-1]:
+        rays_d = np.stack((u, d, -v), axis=0) #Down
+    rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), rays_d)
+    rays_d = np.dot(c2w[:3, :3], rays_d)  # (3, H*W)
+    rays_d = rays_d.transpose((1, 0))  # (H*W, 3)
+    
+
+    rays_o = c2w[:3, 3].reshape((1, 3))
+    rays_o  = np.tile(rays_o, (rays_d.shape[0], 1))  # (H*W, 3)
+
+    depth = np.linalg.inv(c2w)[2, 3]
+    depth = depth * np.ones((rays_o.shape[0],), dtype=np.float32)  # (H*W,)
+
+    return rays_o, rays_d, depth
+
+
+# sampling for training 360 image mapped to sphere
 def get_rays_single_image_360(H, W, intrinsics, c2w):
     pass
     u, v = np.meshgrid(np.arange(W), np.arange(H))
@@ -44,14 +128,14 @@ def get_rays_single_image_360(H, W, intrinsics, c2w):
     # v = v - H / 2
     # print(u, v)
     u = (u / W) * 2 * np.pi # theta
-    # v = (v / H) * np.pi # phi
-    # x = np.sin(v) * np.cos(u)
-    # y = np.sin(v) * np.sin(u)
-    # z = -np.cos(v)
-    r = W / (2 * np.pi)
-    x = np.sin(u) * r
-    y = v
-    z = np.cos(u) * r
+    v = (v / H) * np.pi # phi
+    x = np.sin(v) * np.cos(u)
+    y = np.sin(v) * np.sin(u)
+    z = -np.cos(v)
+    # r = W / (2 * np.pi)
+    # x = np.sin(u) * r
+    # y = v
+    # z = np.cos(u) * r
     x_prime, y_prime, z_prime = x, y, z
     pixels = np.stack((x_prime, y_prime, z_prime), axis=0)
     
@@ -98,9 +182,17 @@ class RaySamplerSingleImage(object):
             self.intrinsics[:2, :3] /= resolution_level
             # only load image at this time
             if self.img_path is not None:
+                
+                # change ground truth image here
                 self.img = imageio.imread(self.img_path).astype(np.float32) / 255.
                 self.img = cv2.resize(self.img, (self.W, self.H), interpolation=cv2.INTER_AREA)
                 self.img = self.img.reshape((-1, 3))
+                # img = self.img.reshape((self.H, self.W, 3))
+                # self.img = e2c(img, face_w=self.W//4, cube_format='horizon')
+                # self.img = self.img.reshape((-1, 3))
+                # self.H =  self.W//4
+                # self.W = self.H * 6
+                # print(self.img.shape)
             else:
                 self.img = None
 
@@ -118,16 +210,27 @@ class RaySamplerSingleImage(object):
             else:
                 self.min_depth = None
 
+            # changing samplin function here
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
             #                                                              self.intrinsics, self.c2w_mat)
-            self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
-                                                                         self.intrinsics, self.c2w_mat)
+            # self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
+                                                                        #  self.intrinsics, self.c2w_mat)
+            # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cubemap(self.H,
+            #                                                              self.intrinsics, self.c2w_mat)
+            self.rays_o, self.rays_d, self.depth = get_rays_single_image_cube(self.H, self.W, self.intrinsics, 
+                                                                              self.c2w_mat, self.img_path)
+                                                                        
 
     def get_img(self):
         if self.img is not None:
             return self.img.reshape((self.H, self.W, 3))
         else:
             return None
+        
+    def get_img_cubemap(self):
+        if self.img is not None:
+            img = self.img.reshape((self.H, self.W, 3))
+            return e2c(img, face_w=self.W/4, cube_format='list')
 
     def get_all(self):
         if self.min_depth is not None:
@@ -179,6 +282,7 @@ class RaySamplerSingleImage(object):
         depth = self.depth[select_inds]         # [N_rand, ]
 
         if self.img is not None:
+            # print(self.img.shape, select_inds.shape)
             rgb = self.img[select_inds, :]          # [N_rand, 3]
         else:
             rgb = None
@@ -210,5 +314,5 @@ class RaySamplerSingleImage(object):
         return ret
 
 
-# b = get_rays_single_image_360(3, 3, None, None)
-# print(b)
+# b = get_rays_single_image_cubemap(360, torch.randn((4,4)), torch.randn((4,4)))
+# print(b[0].shape, b[1].shape, b[2].shape)
