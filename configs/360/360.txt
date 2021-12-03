@@ -1,7 +1,7 @@
 ### INPUT
-datadir = ./data/lf_data
-scene = africa
-expname = africa_cylinder_7
+datadir = ./data/360
+scene = room4_downscale_cube
+expname = room4_downscale_cube_3
 basedir = ./logs
 config = None
 ckpt_path = None
@@ -17,10 +17,10 @@ lrate_decay_steps = 50000000
 
 ### CASCADE
 cascade_level = 2
-cascade_samples = 64,128
+cascade_samples = 64, 128
 
 ### TESTING
-chunk_size = 8192
+chunk_size = 2048
 
 ### RENDERING
 det = False
