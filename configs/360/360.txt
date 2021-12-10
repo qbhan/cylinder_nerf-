@@ -1,7 +1,7 @@
 ### INPUT
 datadir = ./data/360
-scene = room4_downscale_cube
-expname = room4_downscale_cube_3
+scene = room4_downscale
+expname = room4_downscale_c2w_2
 basedir = ./logs
 config = None
 ckpt_path = None

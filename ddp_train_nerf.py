@@ -14,6 +14,7 @@ from tensorboardX import SummaryWriter
 from utils import img2mse, mse2psnr, img_HWC2CHW, colorize, TINY_NUMBER
 import logging
 import json
+from py360convert import c2e
 
 
 logger = logging.getLogger(__package__)

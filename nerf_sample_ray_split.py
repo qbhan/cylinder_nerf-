@@ -86,7 +86,8 @@ def get_rays_single_image_cube(H, W, intrinsics, c2w, imgpath):
 
     u = u.reshape(-1).astype(dtype=np.float32) + 0.5 # add half pixel, adjust center
     v = v.reshape(-1).astype(dtype=np.float32) + 0.5
-    d = np.ones_like(u)
+    # assert(W==H)
+    d = np.ones_like(u) * W / 2
     # pixels = np.stack((u, v, d), axis=0)  # (3, H*W)
     # append rays_d in order of F, R, B, L, U, D
     # each (3, H*W)
@@ -96,7 +97,7 @@ def get_rays_single_image_cube(H, W, intrinsics, c2w, imgpath):
     elif 'R' in imgpath.split('_')[-1]:
         rays_d = np.stack((d, v, -u), axis=0) #Right
     elif 'B' in imgpath.split('_')[-1]:
-        rays_d = np.stack((u, v, -d), axis=0) #Back
+        rays_d = np.stack((-u, v, -d), axis=0) #Back
     elif 'L' in imgpath.split('_')[-1]:
         rays_d = np.stack((-d, v, u), axis=0) #Left
     elif 'U' in imgpath.split('_')[-1]:
@@ -122,13 +123,13 @@ def get_rays_single_image_360(H, W, intrinsics, c2w):
     pass
     u, v = np.meshgrid(np.arange(W), np.arange(H))
 
-    u = u.reshape(-1).astype(dtype=np.float32) + 0.5    # add half pixel
+    u = u.reshape(-1).astype(dtype=np.float32) + 0.5 - W/2   # add half pixel
     v = v.reshape(-1).astype(dtype=np.float32) + 0.5
-    # u = u - W / 2   # set center to 0
-    # v = v - H / 2
+    # set image center as (0, 0, 1) in camera world 
+    
     # print(u, v)
-    u = (u / W) * 2 * np.pi # theta
-    v = (v / H) * np.pi # phi
+    u = (u / W) * 2 * np.pi # -pi ~ pi
+    v = (v / H) * np.pi # 0 ~ pi
     x = np.sin(v) * np.cos(u)
     y = np.sin(v) * np.sin(u)
     z = -np.cos(v)
@@ -139,8 +140,8 @@ def get_rays_single_image_360(H, W, intrinsics, c2w):
     x_prime, y_prime, z_prime = x, y, z
     pixels = np.stack((x_prime, y_prime, z_prime), axis=0)
     
-    rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), pixels)
-    rays_d = np.dot(c2w[:3, :3], rays_d)  # (3, H*W)
+    # rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), pixels)
+    rays_d = np.dot(c2w[:3, :3], pixels)  # (3, H*W)
     rays_d = rays_d.transpose((1, 0))  # (H*W, 3)
     
     rays_o = c2w[:3, 3].reshape((1, 3))
@@ -163,7 +164,8 @@ class RaySamplerSingleImage(object):
         self.W_orig = W
         self.H_orig = H
         self.intrinsics_orig = intrinsics
-        self.c2w_mat = c2w
+        # self.c2w_mat = c2w
+        self.c2w_mat = np.linalg.inv(c2w)
 
         self.img_path = img_path
         self.mask_path = mask_path
@@ -213,12 +215,12 @@ class RaySamplerSingleImage(object):
             # changing samplin function here
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
             #                                                              self.intrinsics, self.c2w_mat)
-            # self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
-                                                                        #  self.intrinsics, self.c2w_mat)
+            self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
+                                                                         self.intrinsics, self.c2w_mat)
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cubemap(self.H,
             #                                                              self.intrinsics, self.c2w_mat)
-            self.rays_o, self.rays_d, self.depth = get_rays_single_image_cube(self.H, self.W, self.intrinsics, 
-                                                                              self.c2w_mat, self.img_path)
+            # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cube(self.H, self.W, self.intrinsics, 
+            #                                                                   self.c2w_mat, self.img_path)
                                                                         
 
     def get_img(self):
