@@ -47,20 +47,31 @@ def get_rays_single_image_cubemap(H, intrinsics, c2w):
 
     u = u.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2   # add half pixel, adjust center
     v = v.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2
-    d = np.ones_like(u)
+    d = np.ones_like(u) * H/2
     # pixels = np.stack((u, v, d), axis=0)  # (3, H*W)
     rays_d_list = []
     # append rays_d in order of F, R, B, L, U, D
     # each (3, H*W)
-    rays_d_list.append(np.stack((u, v, d), axis=0)) #Front
-    rays_d_list.append(np.stack((d, v, -u), axis=0)) #Right
-    rays_d_list.append(np.stack((u, v, -d), axis=0)) #Back
-    rays_d_list.append(np.stack((-d, v, u), axis=0)) #Left
-    rays_d_list.append(np.stack((u, -d, v), axis=0)) #Up
-    rays_d_list.append(np.stack((u, d, -v), axis=0)) #Down
+    F = np.stack((u, v, d), axis=0).reshape((3, H, H))
+    R = np.stack((d, v, -u), axis=0).reshape((3, H, H))
+    B = np.stack((-u, v, -d), axis=0).reshape((3, H, H))
+    L = np.stack((-d, v, u), axis=0).reshape((3, H, H))
+    U = np.stack((u, -d, v), axis=0).reshape((3, H, H))
+    D = np.stack((u, d, -v), axis=0).reshape((3, H, H))
+    # rays_d_list.append(F) #Front
+    # rays_d_list.append(R) #Right
+    # rays_d_list.append(B) #Back
+    # rays_d_list.append(L) #Left
+    # rays_d_list.append(U) #Up
+    # rays_d_list.append(D) #Down
+    # rays_d = np.concatenate(rays_d_list, axis=-1) # (3, H*W*6)
+    
+    for i in range(H):
+        d = np.concatenate((F[:, i], R[:, i], B[:, i], L[:, i], U[:, i], D[:, i]), axis=-1)
+        # print(d)
+        rays_d_list.append(d)
     rays_d = np.concatenate(rays_d_list, axis=-1) # (3, H*W*6)
-    # print(rays_d.shape)
-    rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), rays_d)
+    # rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), rays_d)
     rays_d = np.dot(c2w[:3, :3], rays_d)  # (3, H*W*6)
     rays_d = rays_d.transpose((1, 0))  # (H*W*6, 3)
     rays_d_list.append(rays_d)
@@ -189,11 +200,12 @@ class RaySamplerSingleImage(object):
                 self.img = imageio.imread(self.img_path).astype(np.float32) / 255.
                 self.img = cv2.resize(self.img, (self.W, self.H), interpolation=cv2.INTER_AREA)
                 self.img = self.img.reshape((-1, 3))
-                # img = self.img.reshape((self.H, self.W, 3))
-                # self.img = e2c(img, face_w=self.W//4, cube_format='horizon')
-                # self.img = self.img.reshape((-1, 3))
-                # self.H =  self.W//4
-                # self.W = self.H * 6
+                self.img_org = self.img
+                img = self.img.reshape((self.H, self.W, 3))
+                self.img = e2c(img, face_w=self.W//4, cube_format='horizon')
+                self.img = self.img.reshape((-1, 3))
+                self.H =  self.W//4
+                self.W = self.H * 6
                 # print(self.img.shape)
             else:
                 self.img = None
@@ -215,10 +227,10 @@ class RaySamplerSingleImage(object):
             # changing samplin function here
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
             #                                                              self.intrinsics, self.c2w_mat)
-            self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
-                                                                         self.intrinsics, self.c2w_mat)
-            # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cubemap(self.H,
+            # self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
             #                                                              self.intrinsics, self.c2w_mat)
+            self.rays_o, self.rays_d, self.depth = get_rays_single_image_cubemap(self.H,
+                                                                         self.intrinsics, self.c2w_mat)
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cube(self.H, self.W, self.intrinsics, 
             #                                                                   self.c2w_mat, self.img_path)
                                                                         
@@ -229,10 +241,11 @@ class RaySamplerSingleImage(object):
         else:
             return None
         
-    def get_img_cubemap(self):
-        if self.img is not None:
-            img = self.img.reshape((self.H, self.W, 3))
-            return e2c(img, face_w=self.W/4, cube_format='list')
+    def get_img_orig(self):
+        if self.img_orig is not None:
+            return self.img_orig.reshape((self.H_orig, self.W_orig, 3))
+        else:
+            return None
 
     def get_all(self):
         if self.min_depth is not None:
