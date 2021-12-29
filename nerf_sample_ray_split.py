@@ -229,10 +229,10 @@ class RaySamplerSingleImage(object):
                 self.min_depth = None
 
             # changing samplin function here
-            self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
-                                                                         self.intrinsics, self.c2w_mat)
-            # self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
+            # self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
             #                                                              self.intrinsics, self.c2w_mat)
+            self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
+                                                                         self.intrinsics, self.c2w_mat)
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cubemap(self.H,
             #                                                              self.intrinsics, self.c2w_mat)
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cube(self.H, self.W, self.intrinsics, 
