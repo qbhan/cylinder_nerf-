@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # import numpy as np
-from utils import TINY_NUMBER, HUGE_NUMBER
+from utils import TINY_NUMBER, HUGE_NUMBER, make_c2w
 from collections import OrderedDict
 from nerf_network import Embedder, MLPNet
 import os
@@ -237,3 +237,86 @@ class NerfNetWithAutoExpo(nn.Module):
             ret['autoexpo'] = (scale, shift)
 
         return ret
+
+
+class LearnPose(nn.Module):
+    def __init__(self, num_cams, learn_R, learn_t, init_c2w=None):
+        """
+        :param num_cams:
+        :param learn_R:  True/False
+        :param learn_t:  True/False
+        :param init_c2w: (N, 4, 4) torch tensor
+        """
+        super(LearnPose, self).__init__()
+        self.num_cams = num_cams
+        self.init_c2w = None
+        if init_c2w is not None:
+            self.init_c2w = nn.Parameter(init_c2w, requires_grad=False)
+
+        self.r = nn.Parameter(torch.zeros(size=(num_cams, 3), dtype=torch.float32), requires_grad=learn_R)  # (N, 3)
+        self.t = nn.Parameter(torch.zeros(size=(num_cams, 3), dtype=torch.float32), requires_grad=learn_t)  # (N, 3)
+
+    def forward(self, cam_id):
+        r = self.r[cam_id]  # (3, ) axis-angle
+        t = self.t[cam_id]  # (3, )
+        c2w = make_c2w(r, t)  # (4, 4)
+
+        # learn a delta pose between init pose and target pose, if a init pose is provided
+        if self.init_c2w is not None:
+            c2w = c2w @ self.init_c2w[cam_id]
+
+        return c2w
+
+class LearnFocal(nn.Module):
+    def __init__(self, H, W, req_grad, fx_only, order=2, init_focal=None):
+        super(LearnFocal, self).__init__()
+        self.H = H
+        self.W = W
+        self.fx_only = fx_only  # If True, output [fx, fx]. If False, output [fx, fy]
+        self.order = order  # check our supplementary section.
+
+        if self.fx_only:
+            if init_focal is None:
+                self.fx = nn.Parameter(torch.tensor(1.0, dtype=torch.float32), requires_grad=req_grad)  # (1, )
+            else:
+                if self.order == 2:
+                    # a**2 * W = fx  --->  a**2 = fx / W
+                    coe_x = torch.tensor(np.sqrt(init_focal / float(W)), requires_grad=False).float()
+                elif self.order == 1:
+                    # a * W = fx  --->  a = fx / W
+                    coe_x = torch.tensor(init_focal / float(W), requires_grad=False).float()
+                else:
+                    print('Focal init order need to be 1 or 2. Exit')
+                    exit()
+                self.fx = nn.Parameter(coe_x, requires_grad=req_grad)  # (1, )
+        else:
+            if init_focal is None:
+                self.fx = nn.Parameter(torch.tensor(1.0, dtype=torch.float32), requires_grad=req_grad)  # (1, )
+                self.fy = nn.Parameter(torch.tensor(1.0, dtype=torch.float32), requires_grad=req_grad)  # (1, )
+            else:
+                if self.order == 2:
+                    # a**2 * W = fx  --->  a**2 = fx / W
+                    coe_x = torch.tensor(np.sqrt(init_focal / float(W)), requires_grad=False).float()
+                    coe_y = torch.tensor(np.sqrt(init_focal / float(H)), requires_grad=False).float()
+                elif self.order == 1:
+                    # a * W = fx  --->  a = fx / W
+                    coe_x = torch.tensor(init_focal / float(W), requires_grad=False).float()
+                    coe_y = torch.tensor(init_focal / float(H), requires_grad=False).float()
+                else:
+                    print('Focal init order need to be 1 or 2. Exit')
+                    exit()
+                self.fx = nn.Parameter(coe_x, requires_grad=req_grad)  # (1, )
+                self.fy = nn.Parameter(coe_y, requires_grad=req_grad)  # (1, )
+
+    def forward(self, i=None):  # the i=None is just to enable multi-gpu training
+        if self.fx_only:
+            if self.order == 2:
+                fxfy = torch.stack([self.fx ** 2 * self.W, self.fx ** 2 * self.W])
+            else:
+                fxfy = torch.stack([self.fx * self.W, self.fx * self.W])
+        else:
+            if self.order == 2:
+                fxfy = torch.stack([self.fx**2 * self.W, self.fy**2 * self.H])
+            else:
+                fxfy = torch.stack([self.fx * self.W, self.fy * self.H])
+        return fxfy

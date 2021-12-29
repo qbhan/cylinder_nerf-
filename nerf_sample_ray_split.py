@@ -135,15 +135,15 @@ def get_rays_single_image_360(H, W, intrinsics, c2w):
     u, v = np.meshgrid(np.arange(W), np.arange(H))
 
     u = u.reshape(-1).astype(dtype=np.float32) + 0.5 - W/2   # add half pixel
-    v = v.reshape(-1).astype(dtype=np.float32) + 0.5
+    v = v.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2
     # set image center as (0, 0, 1) in camera world 
     
     # print(u, v)
     u = (u / W) * 2 * np.pi # -pi ~ pi
-    v = (v / H) * np.pi # 0 ~ pi
-    x = np.sin(v) * np.cos(u)
-    y = np.sin(v) * np.sin(u)
-    z = -np.cos(v)
+    v = (v / H) * np.pi # -pi/2 ~ pi/2
+    x = np.cos(-v) * np.sin(u)
+    y = np.sin(-v)
+    z = np.cos(-v) * np.cos(u)
     # r = W / (2 * np.pi)
     # x = np.sin(u) * r
     # y = v
@@ -175,8 +175,8 @@ class RaySamplerSingleImage(object):
         self.W_orig = W
         self.H_orig = H
         self.intrinsics_orig = intrinsics
-        # self.c2w_mat = c2w
-        self.c2w_mat = np.linalg.inv(c2w)
+        self.c2w_mat = c2w
+        # self.c2w_mat = np.linalg.inv(c2w)
 
         self.img_path = img_path
         self.mask_path = mask_path
@@ -185,6 +185,10 @@ class RaySamplerSingleImage(object):
 
         self.resolution_level = -1
         self.set_resolution_level(resolution_level)
+    
+    def update_pose(self, pose):
+        self.c2w_mat = pose
+
 
     def set_resolution_level(self, resolution_level):
         if resolution_level != self.resolution_level:
@@ -201,11 +205,11 @@ class RaySamplerSingleImage(object):
                 self.img = cv2.resize(self.img, (self.W, self.H), interpolation=cv2.INTER_AREA)
                 self.img = self.img.reshape((-1, 3))
                 self.img_org = self.img
-                img = self.img.reshape((self.H, self.W, 3))
-                self.img = e2c(img, face_w=self.W//4, cube_format='horizon')
-                self.img = self.img.reshape((-1, 3))
-                self.H =  self.W//4
-                self.W = self.H * 6
+                # img = self.img.reshape((self.H, self.W, 3))
+                # self.img = e2c(img, face_w=self.W//4, cube_format='horizon')
+                # self.img = self.img.reshape((-1, 3))
+                # self.H =  self.W//4
+                # self.W = self.H * 6
                 # print(self.img.shape)
             else:
                 self.img = None
@@ -225,12 +229,12 @@ class RaySamplerSingleImage(object):
                 self.min_depth = None
 
             # changing samplin function here
-            # self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
-            #                                                              self.intrinsics, self.c2w_mat)
+            self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
+                                                                         self.intrinsics, self.c2w_mat)
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image_360(self.H, self.W,
             #                                                              self.intrinsics, self.c2w_mat)
-            self.rays_o, self.rays_d, self.depth = get_rays_single_image_cubemap(self.H,
-                                                                         self.intrinsics, self.c2w_mat)
+            # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cubemap(self.H,
+            #                                                              self.intrinsics, self.c2w_mat)
             # self.rays_o, self.rays_d, self.depth = get_rays_single_image_cube(self.H, self.W, self.intrinsics, 
             #                                                                   self.c2w_mat, self.img_path)
                                                                         
