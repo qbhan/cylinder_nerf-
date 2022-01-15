@@ -1,7 +1,7 @@
 ### INPUT
 datadir = ./data/lf_data
 scene = africa
-expname = africa_cylinder_7
+expname = africa_test
 basedir = ./logs
 config = None
 ckpt_path = None

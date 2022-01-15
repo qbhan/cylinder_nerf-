@@ -38,6 +38,21 @@ def ddp_test_nerf(rank, args):
 
     ###### create network and wrap in ddp; each process should do this
     start, models = create_nerf(rank, args)
+    # hist_dir = os.path.join(args.basedir, args.expname)
+    # print(hist_dir)
+    # poses = [os.path.join(args.basedir, args.expname, "poses", f)
+    #              for f in sorted(os.listdir(os.path.join(args.basedir, args.expname, "poses"))) if f.endswith('.pth')]
+    # def path2iter(path):
+    #     tmp = os.path.basename(path)[:-4]
+    #     idx = tmp.rfind('e')
+    #     return int(tmp[idx + 1:])
+    # poses = sorted(poses, key=path2iter)
+
+    # N_imgs, poses = get_poses(args.datadir, args.scene, split='train')
+    # print(poses[-1])
+    # print(type(poses))
+    # pose_param_net = torch.load(poses[-1])
+    # pose_param_net.eval()
 
     render_splits = [x.strip() for x in args.render_splits.strip().split(',')]
     # start testing
@@ -49,6 +64,10 @@ def ddp_test_nerf(rank, args):
 
         ###### load data and create ray samplers; each process should do this
         ray_samplers = load_data_split(args.datadir, args.scene, split, try_load_min_depth=args.load_min_depth)
+
+        # for i in range(len(ray_samplers)):
+        #     ray_samplers[i].update_pose(pose_param_net(i).detach().numpy())
+
         for idx in range(len(ray_samplers)):
             ### each process should do this; but only main process merges the results
             fname = '{:06d}.png'.format(idx)

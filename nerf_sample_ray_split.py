@@ -18,8 +18,8 @@ def get_rays_single_image(H, W, intrinsics, c2w):
     '''
     u, v = np.meshgrid(np.arange(W), np.arange(H))
 
-    u = u.reshape(-1).astype(dtype=np.float32) + 0.5 - W/2    # add half pixel
-    v = v.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2
+    u = u.reshape(-1).astype(dtype=np.float32) + 0.5    # add half pixel
+    v = v.reshape(-1).astype(dtype=np.float32) + 0.5
     pixels = np.stack((u, v, np.ones_like(u)), axis=0)  # (3, H*W)
 
     rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), pixels)
@@ -47,7 +47,7 @@ def get_rays_single_image_cubemap(H, intrinsics, c2w):
 
     u = u.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2   # add half pixel, adjust center
     v = v.reshape(-1).astype(dtype=np.float32) + 0.5 - H/2
-    d = np.ones_like(u) * H/2
+    d = np.ones_like(u)
     # pixels = np.stack((u, v, d), axis=0)  # (3, H*W)
     rays_d_list = []
     # append rays_d in order of F, R, B, L, U, D
@@ -58,13 +58,6 @@ def get_rays_single_image_cubemap(H, intrinsics, c2w):
     L = np.stack((-d, v, u), axis=0).reshape((3, H, H))
     U = np.stack((u, -d, v), axis=0).reshape((3, H, H))
     D = np.stack((u, d, -v), axis=0).reshape((3, H, H))
-    # rays_d_list.append(F) #Front
-    # rays_d_list.append(R) #Right
-    # rays_d_list.append(B) #Back
-    # rays_d_list.append(L) #Left
-    # rays_d_list.append(U) #Up
-    # rays_d_list.append(D) #Down
-    # rays_d = np.concatenate(rays_d_list, axis=-1) # (3, H*W*6)
     
     for i in range(H):
         d = np.concatenate((F[:, i], R[:, i], B[:, i], L[:, i], U[:, i], D[:, i]), axis=-1)
@@ -204,13 +197,6 @@ class RaySamplerSingleImage(object):
                 self.img = imageio.imread(self.img_path).astype(np.float32) / 255.
                 self.img = cv2.resize(self.img, (self.W, self.H), interpolation=cv2.INTER_AREA)
                 self.img = self.img.reshape((-1, 3))
-                self.img_org = self.img
-                # img = self.img.reshape((self.H, self.W, 3))
-                # self.img = e2c(img, face_w=self.W//4, cube_format='horizon')
-                # self.img = self.img.reshape((-1, 3))
-                # self.H =  self.W//4
-                # self.W = self.H * 6
-                # print(self.img.shape)
             else:
                 self.img = None
 

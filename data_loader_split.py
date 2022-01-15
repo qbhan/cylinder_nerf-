@@ -3,6 +3,7 @@ import numpy as np
 import imageio
 import logging
 from nerf_sample_ray_split import RaySamplerSingleImage
+# import nerf_sample_ray_split_torch
 import glob
 
 logger = logging.getLogger(__package__)
@@ -37,7 +38,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     split_dir = '{}/{}/{}'.format(basedir, scene, split)
 
     if only_img_files:
-        img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
+        img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg', '*JPG'])
         return img_files
 
     # camera parameters files
@@ -51,7 +52,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     cam_cnt = len(pose_files)
 
     # img files
-    img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
+    img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg', '*JPG'])
     if len(img_files) > 0:
         logger.info('raw img_files: {}'.format(len(img_files)))
         img_files = img_files[::skip]
@@ -60,7 +61,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         img_files = [None, ] * cam_cnt
 
     # mask files
-    mask_files = find_files('{}/mask'.format(split_dir), exts=['*.png', '*.jpg'])
+    mask_files = find_files('{}/mask'.format(split_dir), exts=['*.png', '*.jpg', '*JPG'])
     if len(mask_files) > 0:
         logger.info('raw mask_files: {}'.format(len(mask_files)))
         mask_files = mask_files[::skip]
@@ -69,7 +70,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         mask_files = [None, ] * cam_cnt
 
     # min depth files
-    mindepth_files = find_files('{}/min_depth'.format(split_dir), exts=['*.png', '*.jpg'])
+    mindepth_files = find_files('{}/min_depth'.format(split_dir), exts=['*.png', '*.jpg', '*JPG'])
     if try_load_min_depth and len(mindepth_files) > 0:
         logger.info('raw mindepth_files: {}'.format(len(mindepth_files)))
         mindepth_files = mindepth_files[::skip]
@@ -78,7 +79,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         mindepth_files = [None, ] * cam_cnt
 
     # assume all images have the same size as training image
-    train_imgfile = find_files('{}/{}/train/rgb'.format(basedir, scene), exts=['*.png', '*.jpg'])[0]
+    train_imgfile = find_files('{}/{}/train/rgb'.format(basedir, scene), exts=['*.png', '*.jpg', '*JPG'])[0]
     train_im = imageio.imread(train_imgfile)
     H, W = train_im.shape[:2]
 
@@ -100,6 +101,12 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                   mask_path=mask_files[i],
                                                   min_depth_path=mindepth_files[i],
                                                   max_depth=max_depth))
+        # ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
+        #                                           img_path=img_files[i],
+        #                                           mask_path=mask_files[i],
+        #                                           min_depth_path=mindepth_files[i],
+        #                                           max_depth=max_depth,
+        #                                           val=(split=='test')))
 
     logger.info('Split {}, # views: {}'.format(split, cam_cnt))
 

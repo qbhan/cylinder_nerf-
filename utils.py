@@ -3,6 +3,7 @@ import torch
 # import torch.nn.functional as F
 import numpy as np
 from scipy.spatial.transform import Rotation as RotLib
+import os
 
 
 HUGE_NUMBER = 1e10
@@ -147,7 +148,22 @@ def save_cubemap(dir, w):
             print(img_new_dir)
             img_pil.save(img_new_dir)
         remove(img_dir)
-        
+
+def save_front(dir, w):
+    dirs = listdir(dir)
+    print(dirs)
+    for img_dir in dirs:
+        img_dir = dir + '/' + img_dir
+        print(img_dir)
+        img = np.array(Image.open(img_dir))
+        img_cubelist = e2c(img, w, mode='bilinear', cube_format='list')
+        for i in range(1):
+            img_pil = Image.fromarray(img_cubelist[i].astype('uint8'), 'RGB')
+            img_new_dir = img_dir.split('.')[0] + '_' + arr[i] + '.jpg'
+            print(img_new_dir)
+            img_pil.save(img_new_dir)
+        remove(img_dir)
+
 
 def dup_file(root):
     dirs = listdir(root)
@@ -380,8 +396,10 @@ def Exp(r):
     :param r: (3, ) axis-angle, torch tensor
     :return:  (3, 3)
     """
+    # print(r.shape)
+    r = r + torch.ones_like(r, device=r.device) * 1e-15
     skew_r = vec2skew(r)  # (3, 3)
-    norm_r = r.norm() + 1e-15
+    norm_r = r.norm()# + 1e-15
     eye = torch.eye(3, dtype=torch.float32, device=r.device)
     R = eye + (torch.sin(norm_r) / norm_r) * skew_r + ((1 - torch.cos(norm_r)) / norm_r**2) * (skew_r @ skew_r)
     return R
