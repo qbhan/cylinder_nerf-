@@ -14,6 +14,8 @@ init_pose = model['module.init_c2w']
 R = model['module.r']
 t = model['module.t']
 
+print(R)
+
 savdir = 'sandbox_data/'
 for i in range(init_pose.shape[0]):
     pose = make_c2w(R[i], t[i])
@@ -26,7 +28,6 @@ for i in range(init_pose.shape[0]):
     for j in pose:
         f.write(str(j.item()))
         f.write(" ")
-#     trained_pose.append(pose)
 
 # print(trained_pose)
 # b = a['module.r'].tolist()
