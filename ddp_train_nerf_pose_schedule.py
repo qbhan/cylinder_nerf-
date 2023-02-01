@@ -382,7 +382,7 @@ def create_posenet(rank, args):
     torch.cuda.set_device(rank)
 
     N_imgs, poses = get_poses(args.datadir, args.scene, split='train')
-    net = LearnPose(N_imgs, True, True, poses).to(rank)
+    net = LearnPose(N_imgs, True, True).to(rank)
     net = DDP(net, device_ids=[rank], output_device=rank, find_unused_parameters=True)
     optim = torch.optim.Adam(net.parameters(), lr=0.0005)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optim, milestones=list(range(0, 10000, 100)), gamma=0.9)
@@ -458,7 +458,7 @@ def ddp_train_nerf(rank, args):
     # start training
     what_val_to_log = 0             # helper variable for parallel rendering of a image
     what_train_to_log = 0
-    start_refine_epoch = 200
+    start_refine_epoch = 0
     for global_step in range(start+1, start+1+args.N_iters):
         time0 = time.time()
         scalars_to_log = OrderedDict()
@@ -474,11 +474,11 @@ def ddp_train_nerf(rank, args):
             ray_batch = load_single(img_files, intrinsics_files, pose_param_net, i)
         
         # step scheduler for every epoch
-        if i == (len(img_files)-1):
-            for m in range(models['cascade_level']):
-                scheduler = models['sched_{}'.format(m)]
-                scheduler.step()
-                scheduler_pose.step()
+        # if i == (len(img_files)-1):
+        #     for m in range(models['cascade_level']):
+        #         scheduler = models['sched_{}'.format(m)]
+        #         scheduler.step()
+        #         scheduler_pose.step()
         
         # ray_batch = load_single(img_files, intrinsics_files, pose_param_net, i)
         ray_batch = ray_batch.random_sample(args.N_rand, center_crop=False)

@@ -382,7 +382,7 @@ def create_posenet(rank, args):
     N_imgs, poses = get_poses(args.datadir, args.scene, split='train')
     net = LearnPose(N_imgs, True, True, poses).to(rank)
     net = DDP(net, device_ids=[rank], output_device=rank, find_unused_parameters=True)
-    optim = torch.optim.Adam(net.parameters(), lr=0.00001)
+    optim = torch.optim.Adam(net.parameters(), lr=0.00005)
     return net, optim
 
 def ddp_train_nerf(rank, args):
